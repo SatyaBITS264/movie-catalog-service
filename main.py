@@ -6,7 +6,7 @@ import sqlite3
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
-DB_PATH = Path(__file__).with_name("movies.db")
+DB_PATH = Path("/data/movies.db")
 
 
 def get_connection():
@@ -15,8 +15,7 @@ def get_connection():
     return conn
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
+def initialize_database():
     with get_connection() as conn:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS movies (
@@ -26,12 +25,43 @@ async def lifespan(app: FastAPI):
                 release_year INTEGER NOT NULL
             )
         """)
+
+        sample_movies = [
+            ("Interstellar", "Science Fiction", 2014),
+            ("Inception", "Science Fiction", 2010),
+            ("The Dark Knight", "Action", 2008),
+            ("The Matrix", "Science Fiction", 1999),
+            ("The Shawshank Redemption", "Drama", 1994),
+        ]
+
+        for title, genre, year in sample_movies:
+            existing = conn.execute(
+                """
+                SELECT id FROM movies
+                WHERE title = ? AND release_year = ?
+                """,
+                (title, year),
+            ).fetchone()
+
+            if existing is None:
+                conn.execute(
+                    """
+                    INSERT INTO movies (title, genre, release_year)
+                    VALUES (?, ?, ?)
+                    """,
+                    (title, genre, year),
+                )
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    initialize_database()
     yield
 
 
 app = FastAPI(
     title="Movie Catalog Service",
-    version="1.0.0",
+    version="1.1.0",
     lifespan=lifespan,
 )
 
@@ -55,6 +85,7 @@ def create_movie(movie: MovieCreate):
                VALUES (?, ?, ?)""",
             (movie.title, movie.genre, movie.release_year),
         )
+
         row = conn.execute(
             "SELECT * FROM movies WHERE id = ?",
             (cursor.lastrowid,),
@@ -82,6 +113,9 @@ def get_movie(movie_id: int):
         ).fetchone()
 
     if row is None:
-        raise HTTPException(status_code=404, detail="Movie not found")
+        raise HTTPException(
+            status_code=404,
+            detail="Movie not found",
+        )
 
     return dict(row)
